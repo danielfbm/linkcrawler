@@ -12,6 +12,7 @@ type LinkConfig struct {
 	Host          string
 	Destination   string
 	ExternalLinks bool
+	RespectTree   bool
 }
 
 // IsInHost returns true if is the same host
@@ -33,7 +34,6 @@ func FetchLinks(config LinkConfig) []string {
 	val := struct{}{}
 	idx := cmap.New()
 	printer := NewPrinter(config)
-	// printer.queue <- config.Host
 	idx.SetIfAbsent(config.Host, val)
 	c := colly.NewCollector()
 	// Find and visit all links
@@ -41,24 +41,17 @@ func FetchLinks(config LinkConfig) []string {
 		url := e.Attr("href")
 
 		if config.IsInHost(url) && !config.IsFile(url) && !idx.Has(url) {
-			// fmt.Println("will visit ", url)
 			idx.SetIfAbsent(url, val)
 			e.Request.Visit(url)
 		}
 	})
 
 	c.OnRequest(func(r *colly.Request) {
-		// fmt.Println("Visiting", r.URL)
 		url := r.URL.String()
 		printer.queue <- url
 	})
 
 	c.Visit(config.Host)
-
-	// fmt.Println("------------------")
-	// for i, r := range idx.Items() {
-	// fmt.Println(i, "-", r)
-	// }
 
 	return printer.Start()
 }
@@ -84,67 +77,82 @@ func (p *Printer) Start() (links []string) {
 	links = make([]string, 0, len(p.queue))
 	for {
 		if len(p.queue) == 0 {
-			// fmt.Println("channel closed..")
-			return
+			break
 		}
 		value = <-p.queue
 		if value == "" {
-			// fmt.Println("channel closed..")
-			return
+			break
 		}
-		// file := strings.Replace(strings.TrimRight(strings.TrimLeft(value, p.config.Host), "/"), "/", "-", -1)
-		// err := exec.Command(
-		// 	"wkhtmltopdf",
-		// 	value,
-		// 	"--disable-external-links",
-		// 	"--disable-internal-links",
-		// 	"--orientation", "Portrait",
-		// 	"--page-size", "A4",
-		// 	p.config.Destination+"/"+file+".pdf",
-		// ).Run()
-		// if err != nil {
-		// 	fmt.Println("err saving file: "+p.config.Destination+"/"+file+".pdf : ", err)
-		// } else {
-		// 	fmt.Println("pdf generated: " + p.config.Destination + "/" + file + ".pdf")
-		// }
 		links = append(links, value)
+	}
+	if p.config.RespectTree {
+		tree := &LinkTree{}
+		tree.AddLinks(links...)
+		links = tree.GetLinks()
 	}
 	return
 }
 
-// // Crawler basic crawler
-// type Crawler struct {
-// 	fetch  *fetchbot.Fetcher
-// 	queue  *fetchbot.Queue
-// 	colly.
-// 	config LinkConfig
-// }
+// LinkTree tree of links. It respects the link hierarchy
+type LinkTree struct {
+	Value  string
+	Childs []*LinkTree
+}
 
-// // NewCrawler constructor
-// func NewCrawler(config LinkConfig) *Crawler {
-// 	crawler := &Crawler{config: config}
-// 	f := fetchbot.New(fetchbot.HandlerFunc(crawler.Handle))
-// 	crawler.fetch = f
-// 	crawler.queue = f.Start()
-// 	return crawler
-// }
+// AddLinks add links to a tree
+func (t *LinkTree) AddLinks(links ...string) {
+	if len(links) == 0 {
+		return
+	}
+	// get the first one
+	if t.Value == "" {
+		t.Value = links[0]
+		links = links[1:]
+	}
+	for _, l := range links {
+		t.AddLink(l)
+	}
+}
 
-// // Handle receiving handle function
-// func (c *Crawler) Handle(ctx *fetchbot.Context, res *http.Response, err error) {
-// 	requestURL := ctx.Cmd.URL().RequestURI()
-// 	if c.config.IsInHost(requestURL) && !c.config.IsFile(requestURL) {
-// 		// sdad
-// 		// sdasd
-// 		// c.Add(requestURL)
+// AddLink will add a link to itself as child or to its child if it is in the same root
+// e.g. would add /a/b to /a but not /c to /a
+func (t *LinkTree) AddLink(link string) {
+	if t.Childs == nil {
+		t.Childs = []*LinkTree{}
+	}
+	if !t.IsChild(link, false) {
+		return
+	}
+	for _, c := range t.Childs {
+		if c.IsChild(link, true) {
+			c.AddLink(link)
+			return
+		}
+	}
+	t.Childs = append(t.Childs, &LinkTree{
+		Value:  link,
+		Childs: []*LinkTree{},
+	})
+}
 
-// 	}
-// }
+// IsChild returns true if link is child of the node
+func (t *LinkTree) IsChild(link string, checkChilds bool) (response bool) {
+	if !strings.HasPrefix(link, t.Value) {
+		return
+	}
+	response = true
+	if !checkChilds {
+		return
+	}
+	return
+}
 
-// func (c *Crawler) Add(url string) {
-
-// }
-
-// // Execute run craw function
-// func (c *Crawler) Execute() {
-
-// }
+// GetLinks get links
+func (t *LinkTree) GetLinks() (links []string) {
+	links = make([]string, 0, 1+len(t.Childs))
+	links = append(links, t.Value)
+	for _, c := range t.Childs {
+		links = append(links, c.GetLinks()...)
+	}
+	return
+}
