@@ -39,4 +39,5 @@ func init() {
 	rootCmd.AddCommand(linksCmd)
 	linksCmd.Flags().StringVarP(&linksConfig.Host, "address", "a", "http://localhost:1313/", "host to start crawling")
 	linksCmd.Flags().BoolVarP(&linksConfig.ExternalLinks, "enable-external", "e", false, "crawl external links")
+	linksCmd.Flags().BoolVarP(&linksConfig.RespectTree, "respect-tree", "t", true, "respect url hierarchy")
 }
