@@ -13,6 +13,8 @@ type LinkConfig struct {
 	Destination   string
 	ExternalLinks bool
 	RespectTree   bool
+	FilterIn      []string
+	FilterOut     []string
 }
 
 // IsInHost returns true if is the same host
